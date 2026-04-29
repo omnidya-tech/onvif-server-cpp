@@ -1,0 +1,17 @@
+[Unit]
+Description=ONVIF RTSP streaming server (GStreamer)
+After=network-online.target dashcam.service
+Wants=network-online.target
+# Wait for dashcam service which creates the shared memory socket
+After=dashcam.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/onvif-rtsp
+ExecStartPre=/bin/sh -c 'until [ -S ${SHM_PATH:-/tmp/front.raw} ]; do sleep 1; done'
+ExecStart=/usr/bin/onvif-rtsp-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=ONVIF RTSP server liveness watchdog (DESCRIBE probe)
+Documentation=man:systemd.timer(5)
+After=onvif-rtsp.service
+Requisite=onvif-rtsp.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/onvif-rtsp
+ExecStart=/usr/bin/onvif-rtsp-watchdog

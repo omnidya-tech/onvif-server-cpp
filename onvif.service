@@ -1,0 +1,14 @@
+[Unit]
+Description=ONVIF WS-Discovery responder
+After=network-online.target lighttpd.service onvif-rtsp.service
+Wants=network-online.target onvif-rtsp.service
+Requires=lighttpd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/onvif-wsd-start.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

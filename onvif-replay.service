@@ -1,0 +1,14 @@
+[Unit]
+Description=ONVIF Replay RTSP server (Profile G playback)
+After=network-online.target dashcam.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/onvif-replay
+ExecStart=/usr/bin/python3 /usr/bin/onvif-replay-server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

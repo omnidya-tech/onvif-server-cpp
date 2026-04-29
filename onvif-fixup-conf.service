@@ -1,0 +1,12 @@
+[Unit]
+Description=Normalize default values in /etc/onvif_simple_server.conf
+Before=onvif.service lighttpd.service
+Wants=onvif.service
+
+[Service]
+Type=oneshot
+ExecStart=/etc/onvif-fixup-conf.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

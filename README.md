@@ -1,93 +1,186 @@
 # onvif-server-cpp
 
+C++ ports of the streaming-critical Python services for the IMX8MP dashcam.
 
+## Status
 
-## Getting started
+| Source | Port status | LoC | Notes |
+|---|---|---|---|
+| `onvif-rtsp-server.py` | ✅ **Ported** → `onvif-rtsp-server.cpp` | 211 → 235 | Lazy-flag mode preserved (DESCRIBE-counted, OPTIONS-immune). Same RTSP mounts, env contract, `/tmp/onvif-rtsp-active` semantics. Drop-in replacement. |
+| `onvif-rtsp-watchdog.py` | ✅ **Ported** → `onvif-rtsp-watchdog.cpp` | 113 → 215 | TCP OPTIONS probe, threshold 2, recovery via `systemctl restart onvif-rtsp.service`. |
+| `onvif-replay-server.py` | ⛔ **Not ported** | 195 | Currently broken in Python (Profile G replay 503 → 404 regression). Fix Python first, then port. |
+| `onvif-imaging-cgi.py` | ⏸️ **Deferred** | 307 | Heavy SOAP/XML + JSON via `isp_ctrl`. Port adds ~700 LoC C++ (libxml2 + jsoncpp). Low ROI — called rarely. |
+| `onvif-recording-cgi.py` | ⏸️ **Deferred** | 613 | Largest CGI. Highest risk to break onvif-gui ONVIF surface. Port last if at all. |
+| `onvif-analytics-cgi.py` | ⏸️ **Deferred** | 320 | Same reasoning as imaging. |
+| `isp_ctrl.c` | ✅ Already C (keep) | 75 | Built unchanged via CMakeLists. |
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Files added/changed/removed
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- **Added** `onvif-rtsp-server.cpp` — port of `onvif-rtsp-server.py`
+- **Added** `onvif-rtsp-watchdog.cpp` — port of `onvif-rtsp-watchdog.py`
+- **Added** `CMakeLists.txt` — builds both C++ binaries + `isp_ctrl`
+- **Modified** `onvif-rtsp.service` — `ExecStart` now `/usr/bin/onvif-rtsp-server` (no `python3`)
+- **Unchanged** `onvif-rtsp-watchdog.service` — already pointed at `/usr/bin/onvif-rtsp-watchdog`
+- **Removed** `onvif-rtsp-server.py`, `onvif-rtsp-watchdog.py` — superseded by the `.cpp` ports.
 
-## Add your files
+The earlier `.py` versions are still in git history (`git log --diff-filter=D --summary` will show the deletion commit) if you ever need to inspect them; they're just no longer in the recipe staging tree.
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+## Compatibility checklist (verified by spec)
 
+| Aspect | Python | C++ port | Match |
+|---|---|---|---|
+| RTSP mount paths | `/stream`, `/stream_inside` | same | ✅ |
+| Listen port | `RTSP_PORT` env, default 554 | same | ✅ |
+| Flag file | `/tmp/onvif-rtsp-active` | same | ✅ |
+| Flag-set trigger | `pre-describe-request` (NOT `describe-request`) | same | ✅ |
+| Flag-clear trigger | client `closed` signal | same | ✅ |
+| Re-DESCRIBE no-toggle | per-client-id idempotent counting | per-`GstRTSPClient*` `unordered_set` | ✅ |
+| OPTIONS-only immunity | client never DESCRIBE'd → never counted | same logic | ✅ |
+| Pipeline | `shmsrc → queue → h264parse → rtph264pay` | same | ✅ |
+| `factory.set_shared(True)` | `gst_rtsp_media_factory_set_shared(factory, TRUE)` | ✅ |
+| Stale-flag clear at startup | `_remove_flag()` in main | `remove_flag()` in main | ✅ |
+| atexit cleanup | `atexit.register(_remove_flag)` | `std::atexit(remove_flag)` | ✅ |
+| Signal handler | SIGTERM, SIGINT | `g_unix_signal_add` for both | ✅ |
+| Watchdog probe | OPTIONS over TCP, 5 s timeout, threshold 2 | same | ✅ |
+| Watchdog state file | `/run/onvif-rtsp-watchdog.fail` | same | ✅ |
+| Watchdog recovery | `systemctl restart onvif-rtsp.service` | `fork+execl /bin/systemctl` | ✅ |
+| Watchdog logging | `syslog` LOG_DAEMON | same | ✅ |
+
+## Build (Yocto SDK cross-compile)
+
+```bash
+source /opt/fsl-imx-xwayland/6.12-walnascar/environment-setup-cortexa53-crypto-poky-linux
+cd /home/yokesh/onvif-server-git/onvif-server-cpp
+mkdir -p build-cross && cd build-cross
+cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake --build . -j$(nproc)
+file ./onvif-rtsp-server   # ELF aarch64
+file ./onvif-rtsp-watchdog
 ```
-cd existing_repo
-git remote add origin https://gitlab.qa-omni-dya1738.com/omnidya_india/onvif-server-cpp.git
-git branch -M main
-git push -uf origin main
+
+## Build (native sanity check)
+
+```bash
+sudo apt install libgstreamer1.0-dev libgstrtspserver-1.0-dev libglib2.0-dev
+cd /home/yokesh/onvif-server-git/onvif-server-cpp
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake --build . -j$(nproc)
 ```
 
-## Integrate with your tools
+## Hot-deploy to a single dashcam (skip Yocto, fastest verification)
 
-- [ ] [Set up project integrations](https://gitlab.qa-omni-dya1738.com/omnidya_india/onvif-server-cpp/-/settings/integrations)
+```bash
+DASHCAM=192.168.174.32   # or .25
+scp build-cross/onvif-rtsp-server   root@$DASHCAM:/tmp/onvif-rtsp-server.new
+scp build-cross/onvif-rtsp-watchdog root@$DASHCAM:/tmp/onvif-rtsp-watchdog.new
 
-## Collaborate with your team
+ssh root@$DASHCAM '
+    set -e
+    chmod +x /tmp/onvif-rtsp-server.new /tmp/onvif-rtsp-watchdog.new
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+    mkdir -p /etc/systemd/system/onvif-rtsp.service.d
+    cat > /etc/systemd/system/onvif-rtsp.service.d/override.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=/tmp/onvif-rtsp-server.new
+EOF
 
-## Test and Deploy
+    mkdir -p /etc/systemd/system/onvif-rtsp-watchdog.service.d
+    cat > /etc/systemd/system/onvif-rtsp-watchdog.service.d/override.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=/tmp/onvif-rtsp-watchdog.new
+EOF
 
-Use the built-in continuous integration in GitLab.
+    systemctl daemon-reload
+    systemctl restart onvif-rtsp.service
+    systemctl status onvif-rtsp.service --no-pager | head -10
+'
+```
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+End-to-end verification:
 
-***
+```bash
+ssh root@$DASHCAM 'journalctl -u onvif-rtsp.service -n 20 --no-pager'
+# Expect: "RTSP server listening on port 554 (lazy flag mode)"
+#         "[front] mount /stream -> ( shmsrc ... )"
+#         "[inside] mount /stream_inside -> ( shmsrc ... )"
 
-# Editing this README
+ffprobe -rtsp_transport tcp -v error -show_entries stream=codec_name,width,height \
+    rtsp://admin:admin@$DASHCAM:554/stream
+ffprobe -rtsp_transport tcp -v error -show_entries stream=codec_name,width,height \
+    rtsp://admin:admin@$DASHCAM:554/stream_inside
+# Both must return: codec_name=h264, width=1280, height=720
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+When a client DESCRIBEs, journal should log:
+```
+[FLAG] +client (count=1) → /tmp/onvif-rtsp-active SET
+```
+…and on disconnect:
+```
+[FLAG] -client (count=0) → /tmp/onvif-rtsp-active CLEARED
+```
 
-## Suggestions for a good README
+## Yocto integration (recipe additions)
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+```bbappend
+SRC_URI += " \
+    file://onvif-rtsp-server.cpp \
+    file://onvif-rtsp-watchdog.cpp \
+    file://CMakeLists.txt \
+"
 
-## Name
-Choose a self-explaining name for your project.
+DEPENDS += " \
+    glib-2.0 \
+    gstreamer1.0 \
+    gstreamer1.0-rtsp-server \
+"
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+inherit cmake
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+# Switch over: stop installing the .py files. Leave python3 in RDEPENDS for
+# now since the analytics/imaging/recording CGIs still need it.
+do_install:append() {
+    rm -f ${D}${bindir}/onvif-rtsp-server.py
+    rm -f ${D}${bindir}/onvif-rtsp-watchdog
+}
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+# Bump PR so sstate-cache won't reuse the old build.
+PR = "r<bump>"
+```
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## Rollback
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+**Per-device rollback (during hot-deploy testing only):** removing the
+override drop-ins falls back to whatever the recipe-installed binary is.
+Once the C++ binaries are in the squashfs (after a Yocto rebuild + RAUC
+install), the override removal still leaves you on the C++ binary —
+because that's now what the recipe installs.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```bash
+ssh root@$DASHCAM '
+    rm -f /etc/systemd/system/onvif-rtsp.service.d/override.conf
+    rm -f /etc/systemd/system/onvif-rtsp-watchdog.service.d/override.conf
+    systemctl daemon-reload
+    systemctl restart onvif-rtsp.service
+'
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+**Full rollback to Python:** the `.py` files are no longer in this
+directory, so this isn't possible from a single rebuild. Either:
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+1. Boot the previous RAUC slot (`rauc status` → `rauc mark-active other` →
+   `reboot`) — the inactive slot still contains the prior image with the
+   Python-based services, and is the cleanest recovery if anything goes
+   wrong post-deploy.
+2. Or restore the `.py` files from git history (`git checkout HEAD~1 --
+   onvif-rtsp-server.py onvif-rtsp-watchdog.py`) and revert the recipe
+   changes.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+## Known caveats
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+1. **`onvif-replay-server.py` left in Python.** It was already broken; porting forward without fixing the upstream defect would just obscure the bug.
+2. **CGIs left in Python.** Porting them correctly requires libxml2/jsoncpp wiring, careful SOAP-envelope byte-equivalence, and lighttpd CGI testing. Don't undertake without a test harness for the ONVIF surface.
+3. **No on-device hardware test yet.** Equivalence verified by reading the Python and the gst-rtsp-server C API docs side-by-side. The hot-deploy steps above are the next verification step.

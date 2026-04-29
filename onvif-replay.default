@@ -1,0 +1,7 @@
+# /etc/default/onvif-replay — Replay server environment overrides
+
+# Directory containing MP4 recordings from the dashcam
+RECORDING_DIR=/mnt/videodata/rec
+
+# RTSP listen port for replay (separate from live stream on 554)
+REPLAY_PORT=555

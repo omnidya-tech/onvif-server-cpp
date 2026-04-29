@@ -1,0 +1,10 @@
+# /etc/default/onvif-rtsp — RTSP server environment overrides
+
+# Shared memory sockets from dashcam service (H.264 output)
+SHM_PATH=/tmp/front.raw
+SHM_PATH_INSIDE=/tmp/inside.raw
+
+# RTSP listen port and mount paths
+#RTSP_PORT=554
+#RTSP_PATH=/stream
+#RTSP_PATH_INSIDE=/stream_inside

@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic liveness probe of onvif-rtsp.service
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=onvif-rtsp-watchdog.service
+
+[Install]
+WantedBy=timers.target
