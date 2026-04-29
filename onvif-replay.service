@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=-/etc/default/onvif-replay
-ExecStart=/usr/bin/python3 /usr/bin/onvif-replay-server.py
+ExecStart=/usr/bin/onvif-replay-server
 Restart=on-failure
 RestartSec=5
 

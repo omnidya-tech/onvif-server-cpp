@@ -29,16 +29,16 @@ fi
 
 case "$SERVICE" in
     imaging_service)
-        exec /usr/bin/python3 /usr/bin/onvif-imaging-cgi.py
+        exec /usr/bin/onvif-imaging-cgi
         ;;
     recording_service|search_service)
-        exec /usr/bin/python3 /usr/bin/onvif-recording-cgi.py "$SERVICE"
+        exec /usr/bin/onvif-recording-cgi "$SERVICE"
         ;;
     replay_service)
-        exec /usr/bin/python3 /usr/bin/onvif-recording-cgi.py replay_service
+        exec /usr/bin/onvif-recording-cgi replay_service
         ;;
     analytics_service)
-        exec /usr/bin/python3 /usr/bin/onvif-analytics-cgi.py
+        exec /usr/bin/onvif-analytics-cgi
         ;;
     *)
         cd /usr/share/onvif-simple-server

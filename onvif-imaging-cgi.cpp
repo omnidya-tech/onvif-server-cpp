@@ -10,6 +10,7 @@
 
 #include "cgi_soap.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -454,8 +455,6 @@ void handle_get_status(xmlDocPtr) {
 }
 
 } // namespace
-
-#include <cmath> // for std::round
 
 int main() {
     cgi::ActionTable t;
