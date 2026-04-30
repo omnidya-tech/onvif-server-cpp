@@ -27,6 +27,20 @@ SRC_URI = " \
     file://onvif-recording-cgi.cpp \
     file://onvif-analytics-cgi.cpp \
     file://isp_ctrl.c \
+    \
+    file://media_service_files_overrides/GetVideoEncoderConfiguration.xml \
+    file://media_service_files_overrides/GetVideoEncoderConfigurations_both.xml \
+    \
+    file://device_service_files_overrides/GetCapabilities_no_ptz.xml \
+    file://device_service_files_overrides/GetCapabilities_ptz.xml \
+    file://device_service_files_overrides/GetServices_no_ptz_media2.xml \
+    file://device_service_files_overrides/GetServices_no_ptz_no_media2.xml \
+    file://device_service_files_overrides/GetServices_ptz_media2.xml \
+    file://device_service_files_overrides/GetServices_ptz_no_media2.xml \
+    file://device_service_files_overrides/GetServices_with_capabilities_no_ptz_media2.xml \
+    file://device_service_files_overrides/GetServices_with_capabilities_no_ptz_no_media2.xml \
+    file://device_service_files_overrides/GetServices_with_capabilities_ptz_media2.xml \
+    file://device_service_files_overrides/GetServices_with_capabilities_ptz_no_media2.xml \
 "
 SRCREV = "${AUTOREV}"
 S = "${WORKDIR}/git"
@@ -89,6 +103,13 @@ do_install() {
     # ── CGI wrapper (dispatches to onvif_simple_server or the C++ CGIs) ──
     install -m 0755 ${UNPACKDIR}/onvif_cgi_wrapper.sh ${D}${bindir}/
 
+    # The lighttpd CGI rule in /etc/lighttpd.d/onvif-cgi.conf hard-codes
+    # /etc/onvif_cgi_wrapper.sh as the cgi.assign target. Install a symlink
+    # to the real binary so lighttpd can exec it. Without this, every CGI
+    # call returns 500 Internal Server Error.
+    install -d ${D}${sysconfdir}
+    ln -sf ${bindir}/onvif_cgi_wrapper.sh ${D}${sysconfdir}/onvif_cgi_wrapper.sh
+
     # ── WSD startup wrapper (resolves wlan0 IP dynamically) ──
     install -m 0755 ${UNPACKDIR}/onvif-wsd-start.sh ${D}${bindir}/
 
@@ -102,6 +123,34 @@ do_install() {
             install -m 0644 ${S}/$d/* ${D}${ONVIF_DATADIR}/$d/
         fi
     done
+
+    # ── Customised media-service templates that override the upstream
+    #    ones. The upstream `_both.xml` and `GetVideoEncoderConfiguration.xml`
+    #    hard-code FrameRateLimit=30, BitrateLimit=5000, GovLength=40,
+    #    Quality=100, H264Profile=High — values that don't match what
+    #    dashcam-service's gstreamer pipeline actually produces (10 fps,
+    #    1200 kbps, GOP=10, Main profile). Overriding them here makes the
+    #    Media tab in onvif-gui report the real numbers. ──
+    if [ -d ${UNPACKDIR}/media_service_files_overrides ]; then
+        install -m 0644 ${UNPACKDIR}/media_service_files_overrides/*.xml \
+            ${D}${ONVIF_DATADIR}/media_service_files/
+    fi
+
+    # ── Customised device-service templates that override the upstream
+    #    ones. Upstream onvif_simple_server has no support for the Imaging
+    #    service (no `imaging` strings in the binary, no
+    #    %IMAGING_SERVICE_ADDRESS% placeholder). It thus omits the Imaging
+    #    XAddr from both `GetCapabilities` and `GetServices`. onvif-gui
+    #    follows ONVIF spec: if Imaging isn't advertised, the Image-tab
+    #    sliders stay disabled — even though our onvif-imaging-cgi works
+    #    perfectly when reached directly. The patched templates inject
+    #    <tt:Imaging> into GetCapabilities and a <tds:Service> entry with
+    #    namespace ver20/imaging/wsdl into all GetServices variants, using
+    #    the existing %IP_ADDRESS% placeholder. ──
+    if [ -d ${UNPACKDIR}/device_service_files_overrides ]; then
+        install -m 0644 ${UNPACKDIR}/device_service_files_overrides/*.xml \
+            ${D}${ONVIF_DATADIR}/device_service_files/
+    fi
 
     # ── WSD template files for wsd_simple_server ──
     install -d ${D}${sysconfdir}/wsd_simple_server
@@ -174,6 +223,7 @@ RDEPENDS:${PN} += " \
 
 FILES:${PN} += " \
     ${sysconfdir}/onvif_simple_server.conf \
+    ${sysconfdir}/onvif_cgi_wrapper.sh \
     ${sysconfdir}/onvif-fixup-conf.sh \
     ${sysconfdir}/tmpfiles.d/onvif-bootstrap.conf \
     ${sysconfdir}/wsd_simple_server \

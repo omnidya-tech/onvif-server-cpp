@@ -390,8 +390,17 @@ void handle_set_imaging_settings(xmlDocPtr doc) {
         }
     }
     if (!cproc_args.empty()) {
-        cproc_args["id"] = jv_str("cproc.s.cfg");
-        isp_cmd(cproc_args);
+        // VIV ISP cproc.s.cfg requires the FULL struct (auto, brightness,
+        // contrast, saturation, hue, chroma.out, luma.in, luma.out). Sending
+        // a partial struct returns result=13 (RET_INVALID_PARM). Read-
+        // modify-write: fetch the current config, override only the fields
+        // the SOAP request supplied, then push the merged result.
+        std::map<std::string, JsonValue> merged = isp_get_cproc();
+        for (const auto& [k, v] : cproc_args) merged[k] = v;
+        // Drop the GET response's result-code field so we don't echo it back.
+        merged.erase("result");
+        merged["id"] = jv_str("cproc.s.cfg");
+        isp_cmd(merged);
     }
 
     if (xmlNodePtr exp = cgi::find_element(settings->children, "Exposure", nullptr)) {
@@ -449,6 +458,16 @@ void handle_get_move_options(xmlDocPtr) {
     cgi::soap_response(kXmlns, "<timg:GetMoveOptionsResponse/>");
 }
 
+void handle_get_service_capabilities(xmlDocPtr) {
+    // onvif-gui calls this before enabling the Image tab. Returning a Fault
+    // (the previous behaviour) made the GUI lock down the sliders. Advertise
+    // ImageStabilization=false (we don't have it) and Presets=false.
+    cgi::soap_response(kXmlns,
+        "<timg:GetServiceCapabilitiesResponse>"
+        "<timg:Capabilities ImageStabilization=\"false\" Presets=\"false\"/>"
+        "</timg:GetServiceCapabilitiesResponse>");
+}
+
 void handle_get_status(xmlDocPtr) {
     cgi::soap_response(kXmlns,
         "<timg:GetStatusResponse>"
@@ -466,6 +485,7 @@ void handle_get_status(xmlDocPtr) {
 int main() {
     cgi::ActionTable t;
     t.fault_xmlns = kXmlns;
+    t.on("GetServiceCapabilities", handle_get_service_capabilities);
     t.on("GetImagingSettings", handle_get_imaging_settings);
     t.on("SetImagingSettings", handle_set_imaging_settings);
     t.on("GetOptions",         handle_get_options);
