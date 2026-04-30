@@ -344,7 +344,14 @@ void handle_get_imaging_settings(xmlDocPtr) {
 
 void handle_set_imaging_settings(xmlDocPtr doc) {
     xmlNodePtr root = xmlDocGetRootElement(doc);
-    xmlNodePtr settings = cgi::find_element(root, "ImagingSettings", cgi::NS_TIMG);
+
+    // Use local-name only matching for inner elements. The deployed Yocto
+    // libxml2 (aarch64 walnascar) doesn't propagate prefix-bound namespaces
+    // to descendants the same way the host x86_64 libxml2 does — looking
+    // up <tt:Brightness> by ns href silently misses. Local-name matching
+    // is safe because Brightness/Contrast/ColorSaturation/Exposure/Mode/
+    // ExposureTime/Gain are unique within an ImagingSettings request.
+    xmlNodePtr settings = cgi::find_element(root, "ImagingSettings", nullptr);
     if (!settings) {
         cgi::soap_fault(kXmlns, "s:Receiver", "Missing ImagingSettings element");
         return;
@@ -352,7 +359,7 @@ void handle_set_imaging_settings(xmlDocPtr doc) {
 
     std::map<std::string, JsonValue> cproc_args;
 
-    if (xmlNodePtr el = cgi::find_element(settings->children, "Brightness", cgi::NS_TT)) {
+    if (xmlNodePtr el = cgi::find_element(settings->children, "Brightness", nullptr)) {
         std::string t = cgi::text_of(el);
         if (!t.empty()) {
             int val = static_cast<int>(std::strtod(t.c_str(), nullptr)) - 128;
@@ -361,7 +368,7 @@ void handle_set_imaging_settings(xmlDocPtr doc) {
             cproc_args["brightness"] = jv_num(val);
         }
     }
-    if (xmlNodePtr el = cgi::find_element(settings->children, "Contrast", cgi::NS_TT)) {
+    if (xmlNodePtr el = cgi::find_element(settings->children, "Contrast", nullptr)) {
         std::string t = cgi::text_of(el);
         if (!t.empty()) {
             double val = std::strtod(t.c_str(), nullptr) / 128.0;
@@ -372,7 +379,7 @@ void handle_set_imaging_settings(xmlDocPtr doc) {
             cproc_args["contrast"] = jv_num(val);
         }
     }
-    if (xmlNodePtr el = cgi::find_element(settings->children, "ColorSaturation", cgi::NS_TT)) {
+    if (xmlNodePtr el = cgi::find_element(settings->children, "ColorSaturation", nullptr)) {
         std::string t = cgi::text_of(el);
         if (!t.empty()) {
             double val = std::strtod(t.c_str(), nullptr) / 128.0;
@@ -387,18 +394,18 @@ void handle_set_imaging_settings(xmlDocPtr doc) {
         isp_cmd(cproc_args);
     }
 
-    if (xmlNodePtr exp = cgi::find_element(settings->children, "Exposure", cgi::NS_TT)) {
-        if (xmlNodePtr mode_el = cgi::find_element(exp->children, "Mode", cgi::NS_TT)) {
+    if (xmlNodePtr exp = cgi::find_element(settings->children, "Exposure", nullptr)) {
+        if (xmlNodePtr mode_el = cgi::find_element(exp->children, "Mode", nullptr)) {
             std::string mode = cgi::text_of(mode_el);
             for (auto& c : mode) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
             isp_cmd({{"id", jv_str("ae.s.en")}, {"enable", jv_bool(mode == "AUTO")}});
         }
         std::map<std::string, JsonValue> ec_args;
-        if (xmlNodePtr el = cgi::find_element(exp->children, "ExposureTime", cgi::NS_TT)) {
+        if (xmlNodePtr el = cgi::find_element(exp->children, "ExposureTime", nullptr)) {
             std::string t = cgi::text_of(el);
             if (!t.empty()) ec_args["time"] = jv_num(std::strtod(t.c_str(), nullptr));
         }
-        if (xmlNodePtr el = cgi::find_element(exp->children, "Gain", cgi::NS_TT)) {
+        if (xmlNodePtr el = cgi::find_element(exp->children, "Gain", nullptr)) {
             std::string t = cgi::text_of(el);
             if (!t.empty()) ec_args["gain"] = jv_num(std::strtod(t.c_str(), nullptr));
         }
