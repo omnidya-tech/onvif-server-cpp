@@ -20,11 +20,12 @@
 //      still closed) and the signal would never fire.
 //
 // Env overrides via /etc/default/onvif-rtsp:
-//   SHM_PATH         (/tmp/front.raw)
-//   SHM_PATH_INSIDE  (/tmp/inside.raw)
-//   RTSP_PORT        (554)
-//   RTSP_PATH        (/stream)
-//   RTSP_PATH_INSIDE (/stream_inside)
+//   SHM_PATH              (/tmp/front.raw)
+//   SHM_PATH_INSIDE       (/tmp/inside.raw)
+//   RTSP_PORT             (554)
+//   RTSP_PATH             (/stream)
+//   RTSP_PATH_INSIDE      (/stream_inside)
+//   RTSP_CODEC_INSIDE     (H265)  — set to H264 to serve inside as H.264 instead
 // =============================================================================
 
 #include <gst/gst.h>
@@ -161,7 +162,13 @@ void on_client_connected(GstRTSPServer* /*server*/,
 // Pipeline / mount construction
 // =============================================================================
 
-std::string build_pipeline(const std::string& shm_path) {
+std::string build_pipeline(const std::string& shm_path, bool is_hevc) {
+    if (is_hevc) {
+        return "( shmsrc socket-path=" + shm_path + " is-live=true do-timestamp=true ! "
+               "queue max-size-buffers=3 leaky=downstream ! "
+               "h265parse config-interval=-1 ! "
+               "rtph265pay name=pay0 pt=96 config-interval=1 )";
+    }
     return "( shmsrc socket-path=" + shm_path + " is-live=true do-timestamp=true ! "
            "queue max-size-buffers=3 leaky=downstream ! "
            "h264parse config-interval=-1 ! "
@@ -169,8 +176,8 @@ std::string build_pipeline(const std::string& shm_path) {
 }
 
 void add_mount(GstRTSPServer* server, const char* label,
-               const char* shm_path, const char* mount_path) {
-    std::string pipeline = build_pipeline(shm_path);
+               const char* shm_path, const char* mount_path, bool is_hevc = false) {
+    std::string pipeline = build_pipeline(shm_path, is_hevc);
 
     GstRTSPMountPoints*  mounts  = gst_rtsp_server_get_mount_points(server);
     GstRTSPMediaFactory* factory = gst_rtsp_media_factory_new();
@@ -207,11 +214,14 @@ gboolean on_signal(gpointer user_data) {
 int main(int argc, char** argv) {
     gst_init(&argc, &argv);
 
-    const char* shm_front  = env_or("SHM_PATH",         "/tmp/front.raw");
-    const char* shm_inside = env_or("SHM_PATH_INSIDE",  "/tmp/inside.raw");
-    const char* port       = env_or("RTSP_PORT",        "554");
-    const char* path_front = env_or("RTSP_PATH",        "/stream");
-    const char* path_inside= env_or("RTSP_PATH_INSIDE", "/stream_inside");
+    const char* shm_front    = env_or("SHM_PATH",           "/tmp/front.raw");
+    const char* shm_inside   = env_or("SHM_PATH_INSIDE",    "/tmp/inside.raw");
+    const char* port         = env_or("RTSP_PORT",          "554");
+    const char* path_front   = env_or("RTSP_PATH",          "/stream");
+    const char* path_inside  = env_or("RTSP_PATH_INSIDE",   "/stream_inside");
+    const char* codec_inside = env_or("RTSP_CODEC_INSIDE",  "H265");
+
+    bool inside_hevc = (std::string(codec_inside) == "H265");
 
     // Defensive: clear any stale flag from an unclean prior exit so the C++
     // watcher starts in a known state.
@@ -221,8 +231,8 @@ int main(int argc, char** argv) {
     GstRTSPServer* server = gst_rtsp_server_new();
     gst_rtsp_server_set_service(server, port);
 
-    add_mount(server, "front",  shm_front,  path_front);
-    add_mount(server, "inside", shm_inside, path_inside);
+    add_mount(server, "front",  shm_front,  path_front,  false);
+    add_mount(server, "inside", shm_inside, path_inside, inside_hevc);
 
     ViewerCounter counter;
     g_signal_connect(server, "client-connected",
